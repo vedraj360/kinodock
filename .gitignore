@@ -1,0 +1,24 @@
+# Local Android SDK path and private developer API keys
+**/local.properties
+
+# Android / Gradle generated output
+**/.gradle/
+**/build/
+**/captures/
+*.apk
+*.aab
+*.ap_
+
+# Signing material and local machine files
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+.DS_Store
+.idea/
+.vscode/
+
+# Personal TV configuration and locally sourced/test wallpapers
+/config.json
+/wallpapers/

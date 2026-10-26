@@ -1,0 +1,4 @@
+# Copy these entries into launcher/local.properties (keep the sdk.dir entry created by Android Studio).
+# Use your own API keys. Do not commit local.properties or share a debug APK containing your keys.
+UNSPLASH_ACCESS_KEY=your_unsplash_access_key
+CURRENTS_API_KEY=your_currents_api_key

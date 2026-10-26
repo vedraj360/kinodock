@@ -1,0 +1,9 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:angle="315" android:startColor="#FF252A32" android:endColor="#FF050608" />
+        </shape>
+    </item>
+    <item android:width="52dp" android:height="52dp" android:gravity="center"
+        android:drawable="@drawable/ic_sleep_timer" />
+</layer-list>
