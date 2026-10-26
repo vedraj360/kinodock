@@ -27,6 +27,7 @@ final class FavoriteLogos {
             case "com.android.vending":
             case "com.mxtech.videoplayer.television":
             case "ch.protonvpn.android":
+            case "com.heytap.tv.filebrowser":
                 return true;
             default:
                 return false;
@@ -47,6 +48,7 @@ final class FavoriteLogos {
             case "com.android.vending": id = R.drawable.fav_googleplay; break;
             case "com.mxtech.videoplayer.television": id = R.drawable.fav_mxplayer; break;
             case "ch.protonvpn.android": id = R.drawable.fav_protonvpn; break;
+            case "com.heytap.tv.filebrowser": id = R.drawable.fav_filemanager; break;
             default: return new Lettermark(context, label);
         }
         return context.getDrawable(id);
