@@ -19,7 +19,7 @@ This file records the current launcher behavior and the implementation decisions
 | ZenQuotes batch endpoint | One hour | Current quote and fetched time in SharedPreferences | Keep the current quote; retry later after failure |
 | Currents latest news | 30 minutes; requests up to 20 headlines | Headlines, links, source labels, and timestamps in SharedPreferences | Keep last saved headlines; failed attempts are throttled |
 | SlashYear On This Day | Once per local date | Up to 30 selected events, newest year first | Keep last cached events |
-| Open-Meteo weather/AQI | Existing weather refresh schedule | Current result in SharedPreferences | Keep last successful result and hide unavailable values safely |
+| Open-Meteo weather/AQI; ipwho.is location | Weather/AQI every 30 minutes; IP location once per day | Current weather/AQI and resolved city/coordinates in SharedPreferences | Keep the last successful values; retry a failed location lookup after six hours |
 
 Headlines are D-pad selectable and open their article URL. Quote and history cards do not launch links. The previous one-headline news cache is upgraded by requesting the multi-headline list once; subsequent requests follow the 30-minute schedule. Duplicate titles are dropped before storing the list.
 
@@ -37,14 +37,15 @@ Headlines are D-pad selectable and open their article URL. Quote and history car
 
 - Home uses a dark background and a lower scrim to preserve app-mark contrast. Focus treatment uses bounded scale/alpha changes; optional advanced effects and ambient glow are configurable.
 - Weather shows the resolved city under the temperature. AQI is displayed alongside weather where data is available.
+- Weather location is configurable in Launcher settings: approximate city detection from the public IP (ipwho.is), or a city entered manually and retained as the automatic mode's fallback. The IP lookup runs once a day, uses no GPS permission, and stores only the resolved city/coordinates locally.
 - A small top-right resource line shows RAM used/total in GB and free storage. Some TV kernels report an invalid `MemAvailable`; the code rejects impossible system values and falls back to other `/proc/meminfo` counters.
 - On This Day year labels omit the “CE” suffix.
 
 ## API and secret handling
 
 - User-specific API values belong only in `launcher/local.properties`, which is Git-ignored.
-- `app/build.gradle` uses empty API fields by default. A local debug build may read the contributor's own Unsplash and Currents values; the release build explicitly overrides both to empty strings.
-- Android APKs are inspectable. A developer's debug APK may contain that developer's own keys and must not be distributed. Do not commit generated APKs, build output, signing keys, or `local.properties`.
+- `app/build.gradle` uses empty API fields by default. Local debug builds may read the contributor's own Unsplash and Currents values. A personal release can opt in with `-PincludeLocalApiKeysInRelease=true`; ordinary release builds remain keyless.
+- Android APKs are inspectable. A debug APK or opt-in personal release may contain the developer's own keys and must not be distributed. Do not commit generated APKs, build output, signing keys, or `local.properties`.
 - API calls use connect/read timeouts and run off the UI thread. Cached data is displayed when a request fails; no API error should take down the launcher.
 - All app HTTP clients use a Chrome-style User-Agent. Keep provider-specific policy requirements in mind if replacing or expanding an API integration.
 
@@ -56,4 +57,4 @@ The launcher is branded **KinoDock**, with package ID `com.vdx.kinodock`. The pe
 
 - `screenshots/home.png` is a clean Home preview with no personal wallpaper. The personal App Library contains locally installed apps and is not included in the public screenshots.
 - Before public distribution, review app/service marks and wallpaper assets for redistribution rights. Local `config.json` and the local `wallpapers/` folder are ignored by the root `.gitignore`.
-- Decide how release builds should receive Currents and Unsplash access without embedding shared secrets. Current release builds deliberately ship without those keys.
+- Public builds remain keyless by default; personal releases can opt in using local ignored keys. A server-side proxy would be needed to avoid embedding a shared credential in a distributable APK.

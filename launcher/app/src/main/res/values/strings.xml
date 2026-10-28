@@ -49,6 +49,7 @@
     <string name="home_settings">Choose default home</string>
     <string name="home_settings_help">Select your original home to stop using CleanYourTV as Home, or CleanYourTV to switch back. The original launcher must be enabled and your TV must provide a home picker; use the restore script first if it was disabled.</string>
     <string name="launcher_settings">Launcher settings</string>
+    <string name="now_playing">Now Playing &amp; Lyrics</string>
     <string name="native_settings">Native settings</string>
     <string name="columns_label">Apps per row</string>
     <string name="rows_below_dock_label">Rows below dock</string>
@@ -68,6 +69,18 @@
     <string name="quote_updating">Getting a new quote…</string>
     <string name="quote_updated">Home quote updated</string>
     <string name="quote_update_failed">Couldn’t fetch a new quote. Keeping the current one.</string>
+    <string name="weather_location_title">Weather location</string>
+    <string name="weather_location_state">Weather location: %1$s</string>
+    <string name="weather_location_auto">Auto-detect from internet (IP)</string>
+    <string name="weather_location_manual">Choose a city manually</string>
+    <string name="weather_location_hint">Auto-detect sends your public IP to ipwho.is to estimate your city. It refreshes daily, can be inaccurate with VPN or ISP routing, and does not use GPS.</string>
+    <string name="weather_location_auto_hint">Estimate your city from the current internet connection. A saved manual city is used if IP lookup fails.</string>
+    <string name="weather_location_manual_hint">Set the weather city yourself. Switch back to Auto later to keep it as a fallback.</string>
+    <string name="weather_location_privacy">IP-based location is approximate. You can change this choice any time in Launcher settings.</string>
+    <string name="weather_city_title">Choose city</string>
+    <string name="weather_city_intro">Enter a city name. Add the country if the city name is shared.</string>
+    <string name="weather_city_hint">Enter a city name</string>
+    <string name="weather_city_empty">Enter a city name to save it.</string>
     <string name="animations_state">Animations: %1$s</string>
     <string name="advanced_effects">Advanced effects</string>
     <string name="advanced_effects_state">Advanced effects: %1$s</string>

@@ -60,6 +60,7 @@ import android.view.SoundEffectConstants;
 import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.Window;
+import android.view.WindowManager;
 import android.view.animation.AnimationUtils;
 import android.view.animation.LayoutAnimationController;
 import android.widget.FrameLayout;
@@ -472,6 +473,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         weatherText = findViewById(R.id.weather);
         weatherCity = findViewById(R.id.weatherCity);
         weatherAqi = findViewById(R.id.weatherAqi);
+        weatherBlock.setFocusable(true);
+        weatherBlock.setClickable(true);
+        weatherBlock.setContentDescription("Weather. Press select to see the three-day forecast.");
+        weatherBlock.setBackgroundResource(R.drawable.weather_focus_bg);
+        weatherBlock.setPadding(dp(8), dp(5), dp(8), dp(5));
+        weatherBlock.setOnClickListener(v -> showWeatherForecast());
         homeHighlightLabel = findViewById(R.id.homeHighlightLabel);
         homeHighlightBlock = findViewById(R.id.dailyQuoteBlock);
         dailyQuoteText = findViewById(R.id.dailyQuote);
@@ -848,7 +855,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             int firstButton = btnInputs.getVisibility() == View.VISIBLE ? R.id.btnInputs : firstTopButton().getId();
             int leftButton = rtlMenuBar ? R.id.btnSettings : firstButton;
             int rightButton = rtlMenuBar ? firstButton : R.id.btnSettings;
-            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) return v.getId() == leftButton;
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && v.getId() == leftButton) {
+                // Weather sits at the far left of the header. Make it reachable from the top bar on a remote.
+                if (!rtlMenuBar && weatherBlock.getVisibility() == View.VISIBLE) {
+                    weatherBlock.requestFocus();
+                    return true;
+                }
+                return true;
+            }
             return keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v.getId() == rightButton;
         };
         btnInputs.setOnKeyListener(pillKeys);
@@ -859,6 +873,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         btnReorder.setOnKeyListener(pillKeys);
         btnLibraryTop.setOnKeyListener(pillKeys);
         for (View button : topAppButtons) button.setOnKeyListener(pillKeys);
+        weatherBlock.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+            if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                View first = btnInputs.getVisibility() == View.VISIBLE ? btnInputs : firstTopButton();
+                if (first != null) first.requestFocus();
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                focusTile(singleRow ? lastFocused : lastFocused % COLUMNS);
+                return true;
+            }
+            return keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_LEFT;
+        });
         if (animations) {
             List<View> pills = new ArrayList<>(Arrays.asList(btnInputs, btnWifi, btnVpn, btnReorder,
                     btnLibraryTop, btnSleep, btnSettings));
@@ -1911,7 +1938,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private static final String QUOTE_PREFS = DailyQuoteApi.PREFS;
     private static final String HOME_HIGHLIGHT_PREFS = "home_highlights";
-    private static final String WEATHER_PREFS = "your_tv_weather";
+    private static final String WEATHER_PREFS = OpenMeteo.PREFS_NAME;
     private static final long API_RETRY_MS = 30L * MINUTE_MS;
     private static final long AIR_QUALITY_REFRESH_MS = 60L * MINUTE_MS;
     private static final long QUOTE_REFRESH_MS = 60L * MINUTE_MS;
@@ -2235,7 +2262,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (!weatherActive) return;
             Thread worker = new Thread(() -> {
                 OpenMeteo.Current result = null;
-                try { result = OpenMeteo.fetch(); }
+                try { result = OpenMeteo.fetch(getApplicationContext()); }
                 catch (Exception ignored) { }
                 OpenMeteo.Current current = result;
                 if (current != null) handler.post(() -> {
@@ -2252,7 +2279,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 android.content.SharedPreferences prefs = getSharedPreferences(WEATHER_PREFS, MODE_PRIVATE);
                 if (System.currentTimeMillis() - prefs.getLong("aqi_fetched_at", 0L) >= AIR_QUALITY_REFRESH_MS) {
                     OpenMeteo.AirQuality airQuality = null;
-                    try { airQuality = OpenMeteo.fetchAirQuality(); }
+                    try { airQuality = OpenMeteo.fetchAirQuality(getApplicationContext()); }
                     catch (Exception ignored) { }
                     OpenMeteo.AirQuality currentAqi = airQuality;
                     if (currentAqi != null) handler.post(() -> {
@@ -2274,6 +2301,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void startWeather() {
         if (weatherText == null) return;
+        OpenMeteo.initializeLocation(this);
         String cached = getSharedPreferences(WEATHER_PREFS, MODE_PRIVATE).getString("current", "");
         android.content.SharedPreferences weatherPrefs = getSharedPreferences(WEATHER_PREFS, MODE_PRIVATE);
         if (!cached.isEmpty()) {
@@ -2300,6 +2328,151 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         weatherActive = false;
         handler.removeCallbacks(weatherRefresh);
         handler.removeCallbacks(quoteRefresh);
+    }
+
+    /** A small, cached-first forecast panel; network failures leave the saved forecast readable. */
+    private void showWeatherForecast() {
+        Dialog dialog = new Dialog(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(28), dp(24), dp(28), dp(22));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(0xF2161B22);
+        background.setCornerRadius(dp(22));
+        background.setStroke(dp(1), 0x40FFFFFF);
+        panel.setBackground(background);
+
+        TextView title = new TextView(this);
+        title.setText("3-day forecast");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(25);
+        title.setTypeface(UiFont.get(this, R.string.font_medium));
+        panel.addView(title, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView city = new TextView(this);
+        city.setText(weatherCity == null ? "" : weatherCity.getText());
+        city.setTextColor(0xBFFFFFFF);
+        city.setTextSize(14);
+        LinearLayout.LayoutParams cityParams = new LinearLayout.LayoutParams(-1, -2);
+        cityParams.topMargin = dp(3);
+        cityParams.bottomMargin = dp(18);
+        panel.addView(city, cityParams);
+
+        LinearLayout days = new LinearLayout(this);
+        days.setOrientation(LinearLayout.VERTICAL);
+        panel.addView(days, new LinearLayout.LayoutParams(-1, -2));
+        TextView status = new TextView(this);
+        status.setText("Loading forecast…");
+        status.setTextColor(0xBFFFFFFF);
+        status.setTextSize(16);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
+        statusParams.topMargin = dp(14);
+        panel.addView(status, statusParams);
+
+        TextView close = new TextView(this);
+        close.setText("Close");
+        close.setTextColor(Color.WHITE);
+        close.setTextSize(16);
+        close.setGravity(Gravity.CENTER);
+        close.setFocusable(true);
+        close.setClickable(true);
+        close.setPadding(dp(24), dp(10), dp(24), dp(10));
+        GradientDrawable closeBg = new GradientDrawable();
+        closeBg.setColor(0x22FFFFFF);
+        closeBg.setCornerRadius(dp(24));
+        closeBg.setStroke(dp(1), 0x66FFFFFF);
+        close.setBackground(closeBg);
+        LinearLayout.LayoutParams closeParams = new LinearLayout.LayoutParams(-2, -2);
+        closeParams.gravity = Gravity.END;
+        closeParams.topMargin = dp(20);
+        panel.addView(close, closeParams);
+        close.setOnClickListener(v -> dialog.dismiss());
+
+        dialog.setContentView(panel);
+        dialog.setCancelable(true);
+        dialog.setCanceledOnTouchOutside(true);
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.setLayout(Math.min(dp(500), getResources().getDisplayMetrics().widthPixels - dp(64)),
+                    WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+        close.requestFocus();
+
+        android.content.SharedPreferences prefs = getSharedPreferences(WEATHER_PREFS, MODE_PRIVATE);
+        String cached = prefs.getString("forecast_next_three", "");
+        if (!cached.isEmpty()) renderForecastRows(days, status, cached);
+        Thread worker = new Thread(() -> {
+            String serialized = null;
+            try {
+                JSONArray array = new JSONArray();
+                for (OpenMeteo.ForecastDay day : OpenMeteo.fetchNextThreeDays(getApplicationContext())) {
+                    JSONObject item = new JSONObject();
+                    item.put("date", day.date);
+                    item.put("code", day.code);
+                    item.put("low", day.low);
+                    item.put("high", day.high);
+                    array.put(item);
+                }
+                serialized = array.toString();
+            } catch (Exception ignored) { }
+            String result = serialized;
+            handler.post(() -> {
+                if (!dialog.isShowing()) return;
+                if (result == null || result.isEmpty()) {
+                    if (cached.isEmpty()) status.setText("Forecast is unavailable right now.");
+                    else status.setText("Showing the last saved forecast.");
+                    return;
+                }
+                prefs.edit().putString("forecast_next_three", result)
+                        .putLong("forecast_fetched_at", System.currentTimeMillis()).apply();
+                renderForecastRows(days, status, result);
+            });
+        }, "open-meteo-forecast");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void renderForecastRows(LinearLayout days, TextView status, String json) {
+        days.removeAllViews();
+        try {
+            JSONArray array = new JSONArray(json);
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject item = array.getJSONObject(i);
+                LinearLayout row = new LinearLayout(this);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(dp(14), dp(12), dp(14), dp(12));
+                GradientDrawable rowBg = new GradientDrawable();
+                rowBg.setColor(0x14FFFFFF);
+                rowBg.setCornerRadius(dp(12));
+                row.setBackground(rowBg);
+                TextView date = new TextView(this);
+                date.setText(item.optString("date", ""));
+                date.setTextColor(0xE6FFFFFF);
+                date.setTextSize(16);
+                row.addView(date, new LinearLayout.LayoutParams(0, -2, 1f));
+                TextView condition = new TextView(this);
+                condition.setText(OpenMeteo.glyph(item.optInt("code", 0)));
+                condition.setTextColor(Color.WHITE);
+                condition.setTextSize(18);
+                LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(34), -2);
+                iconParams.setMarginEnd(dp(12));
+                row.addView(condition, iconParams);
+                TextView temperatures = new TextView(this);
+                temperatures.setText(item.optInt("low") + "°  /  " + item.optInt("high") + "°");
+                temperatures.setTextColor(Color.WHITE);
+                temperatures.setTextSize(17);
+                temperatures.setTypeface(UiFont.get(this, R.string.font_medium));
+                row.addView(temperatures, new LinearLayout.LayoutParams(-2, -2));
+                LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(-1, -2);
+                if (i > 0) rowParams.topMargin = dp(8);
+                days.addView(row, rowParams);
+            }
+            status.setText("High / low temperatures · Celsius");
+        } catch (Exception ignored) {
+            if (days.getChildCount() == 0) status.setText("Forecast is unavailable right now.");
+        }
     }
 
     /** A restrained bottom fade behind the app row, rather than a separate opaque card. */
@@ -3776,6 +3949,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             status.setText(network);
             status.setVisibility(View.VISIBLE);
         }
+        addInputRow(rows, popup, R.drawable.ic_music_note, getString(R.string.now_playing), -1,
+                this::openNowPlaying);
         addInputRow(rows, popup, R.drawable.ic_swap_vert, getString(R.string.reorder), -1, this::toggleReorder);
         if (launcherSettingsButton) {
             addInputRow(rows, popup, R.drawable.ic_home_settings_pill, getString(R.string.launcher_settings), -1,
@@ -3796,6 +3971,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
         LinearLayout rows = panel.findViewById(R.id.rows);
         PopupWindow popup = glassPopup(panel, (int) (200 * density));
+        addSettingsMenuRow(rows, popup, R.string.now_playing, this::openNowPlaying);
         if (!launcherSettingsButton) addSettingsMenuRow(rows, popup, R.string.launcher_settings, () -> startActivityForResult(
                 new Intent(this, LauncherSettingsActivity.class), LAUNCHER_SETTINGS_REQUEST));
         // Firmware that ships its own settings app next to the AOSP one (Xiaomi China is one): the
@@ -3816,6 +3992,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         dropIn(popup, panel, anchor, getResources().getBoolean(R.bool.rtl_menu_bar)
                 ? Gravity.START : Gravity.END);
         rows.getChildAt(0).requestFocus();
+    }
+
+    private void openNowPlaying() {
+        try { startActivity(new Intent(this, MusicLyricsActivity.class)); }
+        catch (RuntimeException ignored) {
+            Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+        }
     }
 
     /**

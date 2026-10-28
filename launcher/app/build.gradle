@@ -7,6 +7,8 @@ def localSecretsFile = rootProject.file('local.properties')
 if (localSecretsFile.isFile()) localSecretsFile.withInputStream { localSecrets.load(it) }
 def unsplashAccessKey = localSecrets.getProperty('UNSPLASH_ACCESS_KEY', '')
 def currentsApiKey = localSecrets.getProperty('CURRENTS_API_KEY', '')
+def includeLocalApiKeysInRelease = providers.gradleProperty('includeLocalApiKeysInRelease')
+        .map { it.toBoolean() }.getOrElse(false)
 
 android {
     namespace 'com.vdx.kinodock'
@@ -32,9 +34,11 @@ android {
             buildConfigField 'String', 'CURRENTS_API_KEY', '"' + currentsApiKey.replace('\\', '\\\\').replace('"', '\\"') + '"'
         }
         release {
-            // Public release APKs never contain private credentials, even when local.properties has them.
-            buildConfigField 'String', 'UNSPLASH_ACCESS_KEY', '""'
-            buildConfigField 'String', 'CURRENTS_API_KEY', '""'
+            // Public releases stay keyless by default. A private, personal release can explicitly opt in.
+            buildConfigField 'String', 'UNSPLASH_ACCESS_KEY', includeLocalApiKeysInRelease
+                    ? '"' + unsplashAccessKey.replace('\\', '\\\\').replace('"', '\\"') + '"' : '""'
+            buildConfigField 'String', 'CURRENTS_API_KEY', includeLocalApiKeysInRelease
+                    ? '"' + currentsApiKey.replace('\\', '\\\\').replace('"', '\\"') + '"' : '""'
             // R8 strips and optimises the code (AndroidX included): smaller APK, faster start on a slow TV CPU.
             minifyEnabled true
             shrinkResources true

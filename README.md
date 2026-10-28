@@ -16,7 +16,7 @@ Individual stills: [plain](screenshots/home.png) · [Batman demo](screenshots/ho
 - Remote-friendly focus, navigation, app ordering, and launcher settings.
 - Dark wallpaper backgrounds with optional Unsplash search and a six-hour rotation. Images are streamed and kept in memory rather than saved as wallpaper files.
 - Home cards for mixed quotes, Currents headlines, and On This Day history.
-- Weather and AQI, sleep timer controls, wallpaper selection, and a compact RAM/storage readout.
+- Weather and AQI with an IP-based city estimate or manual city fallback, sleep timer controls, wallpaper selection, and a compact RAM/storage readout. IP location is approximate, sends the public IP to ipwho.is, and does not use GPS.
 - Cached API data and timeouts so network failures keep the launcher usable.
 
 ## Build
@@ -43,7 +43,7 @@ For a release build:
 ./launcher/gradlew -p launcher assembleRelease
 ```
 
-Release builds intentionally contain empty Unsplash and Currents API key fields. Those API-backed features stay unavailable until a release-safe key-provisioning approach is added. Never publish an APK built with private developer keys.
+Release builds contain empty Unsplash and Currents API key fields by default. To build a **private personal release** using keys from `launcher/local.properties`, run `./launcher/gradlew -p launcher -PincludeLocalApiKeysInRelease=true assembleRelease`. That APK contains extractable credentials: keep it private and never publish it. The regular release command remains keyless.
 
 ## API keys
 
@@ -54,7 +54,7 @@ UNSPLASH_ACCESS_KEY=your_own_unsplash_access_key
 CURRENTS_API_KEY=your_own_currents_api_key
 ```
 
-`local.properties` is ignored by Git. Android packages are inspectable: a key included in a debug APK can be extracted. Keep that APK private and use only your own keys. Public release builds override both fields to empty strings. See [SECURITY.md](SECURITY.md).
+`local.properties` is ignored by Git. Android packages are inspectable: keys included in any APK can be extracted. Keep personal debug or opt-in release APKs private and use only your own keys. Public release builds leave both fields empty by default. See [SECURITY.md](SECURITY.md).
 
 ZenQuotes and SlashYear are called without API keys and their data is cached. Check each provider's current usage and attribution terms before redistributing a build or using a different account.
 

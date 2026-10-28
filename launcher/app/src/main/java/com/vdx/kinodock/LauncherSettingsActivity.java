@@ -25,6 +25,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.EditText;
 
 import java.io.File;
 import java.time.LocalDate;
@@ -54,6 +55,18 @@ public final class LauncherSettingsActivity extends Activity {
     private TextView followThemeChoice;
     private TextView openOnStartChoice;
     private TextView quoteChoice;
+    private TextView weatherLocationChoice;
+    private TextView wallpaperDetail;
+    private ImageView wallpaperHeroPreview;
+    private TextView wallpaperHeroTitle;
+    private TextView wallpaperHeroSubtitle;
+    private final ExecutorService heroPreviewLoader = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "wallpaper-settings-preview");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private final TextView[] navigation = new TextView[4];
+    private final View[] pages = new View[4];
     private int columns;
     private int rowsBelowDock;
     private int dockOpacity;
@@ -65,6 +78,7 @@ public final class LauncherSettingsActivity extends Activity {
         super.onCreate(state);
         setContentView(R.layout.activity_launcher_settings);
         choices = getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE);
+        setupSettingsNavigation();
         Config config = Config.load(this);
         View reorderChoice = findViewById(R.id.reorderChoice);
         reorderChoice.setVisibility(config.launcherSettingsButton ? View.VISIBLE : View.GONE);
@@ -123,8 +137,16 @@ public final class LauncherSettingsActivity extends Activity {
         }
         wallpaperChoice = findViewById(R.id.wallpaperChoice);
         wallpaperChoice.setOnClickListener(v -> showWallpaperPicker());
+        wallpaperDetail = findViewById(R.id.wallpaperDetail);
+        wallpaperHeroPreview = findViewById(R.id.wallpaperHeroPreview);
+        wallpaperHeroTitle = findViewById(R.id.wallpaperHeroTitle);
+        wallpaperHeroSubtitle = findViewById(R.id.wallpaperHeroSubtitle);
         quoteChoice = findViewById(R.id.quoteChoice);
         quoteChoice.setOnClickListener(v -> changeQuoteNow());
+        findViewById(R.id.musicLyricsChoice).setOnClickListener(v ->
+                startActivity(new Intent(this, MusicLyricsActivity.class)));
+        weatherLocationChoice = findViewById(R.id.weatherLocationChoice);
+        weatherLocationChoice.setOnClickListener(v -> showWeatherLocationPicker());
         animationsChoice = findViewById(R.id.animationsChoice);
         animationsChoice.setOnClickListener(v -> {
             animations = !animations;
@@ -176,8 +198,35 @@ public final class LauncherSettingsActivity extends Activity {
         findViewById(R.id.tvSettingsChoice).setOnClickListener(v ->
                 open(SystemSettings.intent(this, Settings.ACTION_SETTINGS)));
         refresh();
-        if (config.launcherSettingsButton) reorderChoice.requestFocus();
-        else columnChoices[Math.max(0, Math.min(columns - 4, 3))].requestFocus();
+        int savedPage = Math.max(0, Math.min(choices.getInt("settings_page", 0), pages.length - 1));
+        showSettingsPage(savedPage, false);
+        if (config.launcherSettingsButton && reorderChoice.getVisibility() == View.VISIBLE) reorderChoice.requestFocus();
+        else navigation[savedPage].requestFocus();
+    }
+
+    private void setupSettingsNavigation() {
+        int[] navIds = {R.id.settingsNavHome, R.id.settingsNavWallpaper,
+                R.id.settingsNavDisplay, R.id.settingsNavSystem};
+        int[] pageIds = {R.id.settingsPageHome, R.id.settingsPageWallpaper,
+                R.id.settingsPageDisplay, R.id.settingsPageSystem};
+        for (int i = 0; i < navigation.length; i++) {
+            final int page = i;
+            navigation[i] = findViewById(navIds[i]);
+            pages[i] = findViewById(pageIds[i]);
+            navigation[i].setOnClickListener(v -> showSettingsPage(page, true));
+        }
+    }
+
+    private void showSettingsPage(int page, boolean focusContent) {
+        for (int i = 0; i < pages.length; i++) {
+            pages[i].setVisibility(i == page ? View.VISIBLE : View.GONE);
+            navigation[i].setSelected(i == page);
+        }
+        choices.edit().putInt("settings_page", page).apply();
+        if (!focusContent) return;
+        int[] firstIds = {R.id.quoteChoice, R.id.wallpaperChoice, R.id.columns4, R.id.followThemeChoice};
+        View first = findViewById(firstIds[page]);
+        first.post(first::requestFocus);
     }
 
     private void reverseRow(TextView[] views) {
@@ -288,7 +337,7 @@ public final class LauncherSettingsActivity extends Activity {
                     : !unsplashCurrent && file.getName().equals(current);
             View option = photoTile ? wallpaperOptionUnsplash(unsplashPhoto, selected, dialog, previews)
                     : wallpaperOption(file, selected, dialog, previews);
-            LinearLayout.LayoutParams optionParams = new LinearLayout.LayoutParams(0, dp(100), 1f);
+            LinearLayout.LayoutParams optionParams = new LinearLayout.LayoutParams(0, dp(140), 1f);
             if (i % 2 == 1) optionParams.setMarginStart(dp(10));
             optionRow.addView(option, optionParams);
             if (selected || (firstChoice == null && i == 0)) firstChoice = option;
@@ -353,26 +402,253 @@ public final class LauncherSettingsActivity extends Activity {
         });
     }
 
+    private void showWeatherLocationPicker() {
+        SharedPreferences weather = getSharedPreferences(OpenMeteo.PREFS_NAME, MODE_PRIVATE);
+        boolean manual = OpenMeteo.LOCATION_MODE_MANUAL.equals(
+                weather.getString(OpenMeteo.LOCATION_MODE_KEY, OpenMeteo.LOCATION_MODE_AUTO));
+        Dialog dialog = weatherDialog();
+        LinearLayout panel = weatherDialogPanel();
+        addWeatherDialogTitle(panel, R.string.weather_location_title,
+                R.string.weather_location_hint);
+        View auto = weatherLocationOption(R.string.weather_location_auto,
+                R.string.weather_location_auto_hint, !manual, () -> {
+                    dialog.dismiss();
+                    setWeatherLocationAuto();
+                });
+        View manualOption = weatherLocationOption(R.string.weather_location_manual,
+                R.string.weather_location_manual_hint, manual, () -> {
+                    dialog.dismiss();
+                    showManualWeatherCityDialog();
+                });
+        panel.addView(auto, weatherOptionParams());
+        panel.addView(manualOption, weatherOptionParams());
+        addWeatherDialogNote(panel, R.string.weather_location_privacy);
+        dialog.setContentView(panel);
+        showWeatherDialog(dialog, auto);
+    }
+
+    private void setWeatherLocationAuto() {
+        SharedPreferences weather = getSharedPreferences(OpenMeteo.PREFS_NAME, MODE_PRIVATE);
+        weather.edit().putString(OpenMeteo.LOCATION_MODE_KEY, OpenMeteo.LOCATION_MODE_AUTO)
+                .remove("current").remove("city")
+                .remove("fetched_at").remove("aqi").remove("aqi_fetched_at").apply();
+        OpenMeteo.clearLocationCache(this);
+        changed();
+        refresh();
+    }
+
+    private void showManualWeatherCityDialog() {
+        SharedPreferences weather = getSharedPreferences(OpenMeteo.PREFS_NAME, MODE_PRIVATE);
+        Dialog dialog = weatherDialog();
+        LinearLayout panel = weatherDialogPanel();
+        addWeatherDialogTitle(panel, R.string.weather_city_title, R.string.weather_city_intro);
+
+        EditText cityInput = new EditText(this);
+        cityInput.setSingleLine(true);
+        cityInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                | android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        cityInput.setHint(R.string.weather_city_hint);
+        cityInput.setHintTextColor(0xFF9BA6B2);
+        cityInput.setTextColor(Color.WHITE);
+        cityInput.setTextSize(18);
+        cityInput.setPadding(dp(18), 0, dp(18), 0);
+        cityInput.setBackground(weatherInputBackground());
+        cityInput.setText(weather.getString(OpenMeteo.MANUAL_CITY_KEY, ""));
+        cityInput.setSelection(cityInput.length());
+        LinearLayout.LayoutParams inputParams = new LinearLayout.LayoutParams(-1, dp(62));
+        inputParams.topMargin = dp(20);
+        panel.addView(cityInput, inputParams);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams actionsParams = new LinearLayout.LayoutParams(-1, dp(58));
+        actionsParams.topMargin = dp(18);
+        panel.addView(actions, actionsParams);
+        TextView cancel = weatherDialogAction(android.R.string.cancel, false);
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        actions.addView(cancel, weatherActionParams(true));
+        TextView save = weatherDialogAction(android.R.string.ok, true);
+        save.setOnClickListener(v -> {
+            String city = cityInput.getText().toString().trim();
+            if (city.isEmpty()) {
+                Toast.makeText(this, R.string.weather_city_empty, Toast.LENGTH_SHORT).show();
+                cityInput.requestFocus();
+                return;
+            }
+            weather.edit().putString(OpenMeteo.LOCATION_MODE_KEY, OpenMeteo.LOCATION_MODE_MANUAL)
+                    .putString(OpenMeteo.MANUAL_CITY_KEY, city).remove("current").remove("city")
+                    .remove("fetched_at").remove("aqi").remove("aqi_fetched_at").apply();
+            OpenMeteo.clearLocationCache(this);
+            changed();
+            refresh();
+            dialog.dismiss();
+        });
+        actions.addView(save, weatherActionParams(false));
+        dialog.setContentView(panel);
+        showWeatherDialog(dialog, cityInput);
+    }
+
+    private Dialog weatherDialog() {
+        Dialog dialog = new Dialog(this);
+        dialog.setCanceledOnTouchOutside(true);
+        return dialog;
+    }
+
+    private LinearLayout weatherDialogPanel() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(30), dp(26), dp(30), dp(24));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(0xFF11161D);
+        background.setCornerRadius(dp(22));
+        background.setStroke(dp(1), 0x35FFFFFF);
+        panel.setBackground(background);
+        return panel;
+    }
+
+    private void addWeatherDialogTitle(LinearLayout panel, int titleRes, int subtitleRes) {
+        TextView title = new TextView(this);
+        title.setText(titleRes);
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(27);
+        title.setTypeface(UiFont.get(this, R.string.font_medium));
+        panel.addView(title, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView subtitle = new TextView(this);
+        subtitle.setText(subtitleRes);
+        subtitle.setTextColor(0xFFB8C1CA);
+        subtitle.setTextSize(15);
+        subtitle.setTypeface(UiFont.get(this, R.string.font_regular));
+        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(-1, -2);
+        subtitleParams.topMargin = dp(6);
+        subtitleParams.bottomMargin = dp(18);
+        panel.addView(subtitle, subtitleParams);
+    }
+
+    private View weatherLocationOption(int titleRes, int subtitleRes, boolean selected, Runnable action) {
+        LinearLayout option = new LinearLayout(this);
+        option.setOrientation(LinearLayout.HORIZONTAL);
+        option.setGravity(Gravity.CENTER_VERTICAL);
+        option.setPadding(dp(18), dp(12), dp(18), dp(12));
+        option.setBackgroundResource(R.drawable.settings_choice_bg);
+        option.setSelected(selected);
+        option.setFocusable(true);
+        option.setClickable(true);
+        option.setOnClickListener(v -> action.run());
+
+        LinearLayout text = new LinearLayout(this);
+        text.setOrientation(LinearLayout.VERTICAL);
+        TextView title = new TextView(this);
+        title.setText(titleRes);
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(19);
+        title.setTypeface(UiFont.get(this, R.string.font_medium));
+        text.addView(title, new LinearLayout.LayoutParams(-1, -2));
+        TextView subtitle = new TextView(this);
+        subtitle.setText(subtitleRes);
+        subtitle.setTextColor(0xFFB8C1CA);
+        subtitle.setTextSize(13);
+        subtitle.setTypeface(UiFont.get(this, R.string.font_regular));
+        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(-1, -2);
+        subtitleParams.topMargin = dp(3);
+        text.addView(subtitle, subtitleParams);
+        option.addView(text, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        TextView mark = new TextView(this);
+        mark.setText(selected ? "✓" : "›");
+        mark.setTextColor(selected ? 0xFFB9E7C7 : 0xFFACB8C1);
+        mark.setTextSize(25);
+        option.addView(mark, new LinearLayout.LayoutParams(dp(32), -2));
+        return option;
+    }
+
+    private void addWeatherDialogNote(LinearLayout panel, int textRes) {
+        TextView note = new TextView(this);
+        note.setText(textRes);
+        note.setTextColor(0xFF8F9BA7);
+        note.setTextSize(13);
+        note.setTypeface(UiFont.get(this, R.string.font_regular));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
+        params.topMargin = dp(16);
+        panel.addView(note, params);
+    }
+
+    private TextView weatherDialogAction(int textRes, boolean primary) {
+        TextView action = new TextView(this);
+        action.setText(textRes);
+        action.setTextColor(primary ? Color.WHITE : 0xFFD4DCE4);
+        action.setTextSize(16);
+        action.setTypeface(UiFont.get(this, R.string.font_medium));
+        action.setGravity(Gravity.CENTER);
+        action.setBackgroundResource(R.drawable.settings_choice_bg);
+        action.setFocusable(true);
+        action.setClickable(true);
+        action.setSelected(primary);
+        return action;
+    }
+
+    private LinearLayout.LayoutParams weatherOptionParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(82));
+        params.bottomMargin = dp(10);
+        return params;
+    }
+
+    private LinearLayout.LayoutParams weatherActionParams(boolean marginEnd) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, 1f);
+        if (marginEnd) params.setMarginEnd(dp(12));
+        return params;
+    }
+
+    private GradientDrawable weatherInputBackground() {
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(0xFF242B34);
+        background.setCornerRadius(dp(12));
+        background.setStroke(dp(1), 0x557D8995);
+        return background;
+    }
+
+    private void showWeatherDialog(Dialog dialog, View initialFocus) {
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.dimAmount = 0.68f;
+            window.setAttributes(params);
+        }
+        dialog.show();
+        if (window != null) {
+            int width = Math.min(dp(900), Math.round(getResources().getDisplayMetrics().widthPixels * 0.88f));
+            window.setLayout(width, WindowManager.LayoutParams.WRAP_CONTENT);
+            window.setGravity(Gravity.CENTER);
+        }
+        if (initialFocus != null) initialFocus.post(() -> {
+            if (!dialog.isShowing()) return;
+            initialFocus.requestFocus();
+            if (initialFocus instanceof EditText) {
+                ((EditText) initialFocus).post(() -> {
+                    if (dialog.isShowing()) ((EditText) initialFocus).requestFocus();
+                });
+            }
+        });
+    }
+
     private View wallpaperOption(File file, boolean selected, Dialog dialog, ExecutorService previews) {
         LinearLayout card = new LinearLayout(this);
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setPadding(dp(10), dp(8), dp(12), dp(8));
+        card.setPadding(dp(12), dp(10), dp(14), dp(10));
         card.setBackgroundResource(R.drawable.settings_choice_bg);
         card.setSelected(selected);
         card.setFocusable(true);
         card.setClickable(true);
-        card.setOnFocusChangeListener((view, focused) -> {
-            view.setScaleX(focused ? 1.025f : 1f);
-            view.setScaleY(focused ? 1.025f : 1f);
-        });
 
         if (file != null) {
             ImageView preview = new ImageView(this);
             preview.setScaleType(ImageView.ScaleType.CENTER_CROP);
             preview.setBackgroundColor(0xFF202833);
             preview.setTag(file.getAbsolutePath());
-            card.addView(preview, new LinearLayout.LayoutParams(dp(138), dp(78)));
+            card.addView(preview, new LinearLayout.LayoutParams(dp(196), dp(110)));
             String path = file.getAbsolutePath();
             previews.execute(() -> {
                 Bitmap bitmap = decodeWallpaperPreview(file);
@@ -440,20 +716,16 @@ public final class LauncherSettingsActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setPadding(dp(10), dp(8), dp(12), dp(8));
+        card.setPadding(dp(12), dp(10), dp(14), dp(10));
         card.setBackgroundResource(R.drawable.settings_choice_bg);
         card.setSelected(selected);
         card.setFocusable(true);
         card.setClickable(true);
-        card.setOnFocusChangeListener((view, focused) -> {
-            view.setScaleX(focused ? 1.025f : 1f);
-            view.setScaleY(focused ? 1.025f : 1f);
-        });
         ImageView preview = new ImageView(this);
         preview.setScaleType(ImageView.ScaleType.CENTER_CROP);
         preview.setBackgroundColor(0xFF202833);
         preview.setTag(photo.imageUrl);
-        card.addView(preview, new LinearLayout.LayoutParams(dp(138), dp(78)));
+        card.addView(preview, new LinearLayout.LayoutParams(dp(196), dp(110)));
         previews.execute(() -> {
             Bitmap bitmap = decodeRemoteWallpaperPreview(photo.imageUrl);
             runOnUiThread(() -> {
@@ -524,10 +796,6 @@ public final class LauncherSettingsActivity extends Activity {
         button.setFocusable(true);
         button.setClickable(true);
         button.setBackgroundResource(R.drawable.settings_choice_bg);
-        button.setOnFocusChangeListener((view, focused) -> {
-            view.setScaleX(focused ? 1.03f : 1f);
-            view.setScaleY(focused ? 1.03f : 1f);
-        });
         button.setOnClickListener(v -> action.run());
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, 1f);
         params.setMarginEnd(dp(8));
@@ -690,8 +958,82 @@ public final class LauncherSettingsActivity extends Activity {
                         : "none".equals(wallpaperCurrent) ? getString(R.string.wallpaper_none)
                         : wallpaperCurrent != null ? wallpaperCurrent
                         : getString(R.string.wallpaper_theme_default)));
+        if (wallpaperDetail != null) {
+            String detail = choices.getBoolean(WallpaperRotation.LOCAL_AUTO_ROTATE_KEY, false)
+                    ? "Local collection · automatic every 30 minutes"
+                    : UnsplashWallpaperApi.enabled(this) ? "Unsplash · updates every six hours"
+                    : "Choose one image or turn on local rotation";
+            wallpaperDetail.setText(detail);
+        }
+        loadWallpaperHeroPreview();
+        weatherLocationChoice.setText(getString(R.string.weather_location_state,
+                OpenMeteo.currentLocationLabel(this)));
         openOnStartChoice.setText(getString(R.string.open_on_start_state, openOnStartLabel()));
         followThemeChoice.setSelected(!hasOnTvChoices());
+    }
+
+    private void loadWallpaperHeroPreview() {
+        if (wallpaperHeroPreview == null) return;
+        String choice = choices.getString(Config.WALLPAPER_CHOICE_KEY, null);
+        boolean unsplash = UnsplashWallpaperApi.enabled(this);
+        boolean localRotate = choices.getBoolean(WallpaperRotation.LOCAL_AUTO_ROTATE_KEY, false);
+        File selected = null;
+        String imageUrl = null;
+        String title;
+        String subtitle;
+        if (unsplash) {
+            UnsplashWallpaperApi.Photo photo = UnsplashWallpaperApi.current(this);
+            imageUrl = photo == null ? null : photo.imageUrl;
+            title = photo == null ? "Unsplash wallpaper" : (photo.description.isEmpty() ? "Unsplash wallpaper" : photo.description);
+            subtitle = photo == null ? "The current photo will appear when it is available" : photo.credit();
+        } else {
+            File dir = Config.dir(this);
+            File folder = dir == null ? null : new File(dir, "wallpapers");
+            List<File> images = new ArrayList<>(WallpaperRotation.images(folder));
+            File single = dir == null ? null : new File(dir, Config.WALLPAPER_NAME);
+            if (single != null && single.isFile()) images.add(0, single);
+            if (localRotate) {
+                String last = getSharedPreferences("wallpaper_rotation", MODE_PRIVATE).getString("image", "");
+                selected = WallpaperRotation.find(images, last);
+                if (selected == null && !images.isEmpty()) selected = images.get(0);
+                title = "Local wallpaper rotation";
+                subtitle = "Changes every 30 minutes · " + images.size() + " images";
+            } else {
+                selected = choice == null ? (images.isEmpty() ? null : images.get(0))
+                        : WallpaperRotation.find(images, choice);
+                if (selected == null && single != null && single.isFile() && choice != null && choice.equals(single.getName())) selected = single;
+                if ("none".equals(choice)) selected = null;
+                title = selected == null ? ("none".equals(choice) ? "No wallpaper" : "Theme wallpaper")
+                        : displayWallpaperName(selected.getName());
+                subtitle = selected == null ? "Choose a photo from the gallery" : "Current Home background";
+            }
+        }
+        wallpaperHeroTitle.setText(title);
+        wallpaperHeroSubtitle.setText(subtitle);
+        String path = selected == null ? "" : selected.getAbsolutePath();
+        String source = imageUrl == null ? path : imageUrl;
+        wallpaperHeroPreview.setTag(source);
+        wallpaperHeroPreview.setImageDrawable(null);
+        if (source.isEmpty()) return;
+        final File imageFile = selected;
+        final String remote = imageUrl;
+        heroPreviewLoader.execute(() -> {
+            Bitmap bitmap = remote != null ? decodeRemoteWallpaperPreview(remote)
+                    : imageFile == null ? null : decodeWallpaperPreview(imageFile);
+            runOnUiThread(() -> {
+                if (isFinishing() || !source.equals(wallpaperHeroPreview.getTag())) {
+                    if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+                    return;
+                }
+                if (bitmap != null) wallpaperHeroPreview.setImageBitmap(bitmap);
+            });
+        });
+    }
+
+    @Override
+    protected void onDestroy() {
+        heroPreviewLoader.shutdownNow();
+        super.onDestroy();
     }
 
     private boolean hasOnTvChoices() {
