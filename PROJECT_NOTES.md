@@ -40,6 +40,7 @@ Headlines are D-pad selectable and open their article URL. Quote and history car
 - Weather location is configurable in Launcher settings: approximate city detection from the public IP (ipwho.is), or a city entered manually and retained as the automatic mode's fallback. The IP lookup runs once a day, uses no GPS permission, and stores only the resolved city/coordinates locally.
 - A small top-right resource line shows RAM used/total in GB and free storage. Some TV kernels report an invalid `MemAvailable`; the code rejects impossible system values and falls back to other `/proc/meminfo` counters.
 - On This Day year labels omit the “CE” suffix.
+- The Inputs popup includes a Bluetooth devices row when the device advertises Bluetooth hardware. It opens the system Bluetooth settings so Android handles discovery, pairing, and reconnection without launcher-side scanning or a new location prompt.
 
 ## API and secret handling
 

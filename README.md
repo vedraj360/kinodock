@@ -14,6 +14,7 @@ Individual stills: [plain](screenshots/home.png) · [Batman demo](screenshots/ho
 
 - Customizable favorites row, with other installed apps available in the scrollable App Library.
 - Remote-friendly focus, navigation, app ordering, and launcher settings.
+- An Inputs menu that includes HDMI/Live TV sources and opens Android's Bluetooth device list for pairing or reconnecting devices.
 - Dark wallpaper backgrounds with optional Unsplash search and a six-hour rotation. Images are streamed and kept in memory rather than saved as wallpaper files.
 - Home cards for mixed quotes, Currents headlines, and On This Day history.
 - Weather and AQI with an IP-based city estimate or manual city fallback, sleep timer controls, wallpaper selection, and a compact RAM/storage readout. IP location is approximate, sends the public IP to ipwho.is, and does not use GPS.

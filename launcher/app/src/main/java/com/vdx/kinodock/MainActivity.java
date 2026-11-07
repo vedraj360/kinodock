@@ -3561,7 +3561,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             return;
         }
         boolean any = liveTvIntent() != null || !sourcePanelService.isEmpty()
-                || (coocaaSources && !CoocaaSources.list(this).isEmpty());
+                || (coocaaSources && !CoocaaSources.list(this).isEmpty())
+                || getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH);
         TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
         if (!any && tim != null) {
             for (TvInputInfo info : tim.getTvInputList()) {
@@ -3859,6 +3860,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (rows.getChildCount() > 0) addSeparator(rows);
             final Intent liveTvIntent = liveTv;
             addInputRow(rows, popup, R.drawable.ic_livetv, getString(R.string.live_tv), -1, () -> open(liveTvIntent));
+        }
+        // Android manages discovery, pairing, and profile connections. Keep the entry in this same
+        // list without running a launcher-side scan that would need location access.
+        if (getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH)) {
+            if (rows.getChildCount() > 0) addSeparator(rows);
+            addInputRow(rows, popup, R.drawable.ic_bluetooth, getString(R.string.bluetooth_devices), -1,
+                    () -> open(systemIntent(Settings.ACTION_BLUETOOTH_SETTINGS)));
+            TextView hint = rows.getChildAt(rows.getChildCount() - 1).findViewById(R.id.status);
+            hint.setText(R.string.bluetooth_pair_or_connect);
+            hint.setVisibility(View.VISIBLE);
         }
         if (rows.getChildCount() == 0) {
             Toast.makeText(this, R.string.no_inputs, Toast.LENGTH_SHORT).show();
