@@ -381,6 +381,13 @@
                     android:text="@string/inputs"
                     android:drawableStart="@drawable/ic_input"
                     android:nextFocusDown="@+id/grid" />
+
+                <TextView
+                    android:id="@+id/btnAccessories"
+                    style="@style/TopButtonIcon"
+                    android:contentDescription="@string/bluetooth_accessories"
+                    android:drawableStart="@drawable/ic_bluetooth"
+                    android:nextFocusDown="@+id/grid" />
             </LinearLayout>
         </RelativeLayout>
 

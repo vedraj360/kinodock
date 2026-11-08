@@ -3,7 +3,15 @@
     <string name="app_name">KinoDock</string>
     <string name="inputs">Inputs</string>
     <string name="bluetooth_devices">Bluetooth devices</string>
-    <string name="bluetooth_pair_or_connect">Pair or connect</string>
+    <string name="bluetooth_accessories">Bluetooth accessories</string>
+    <string name="bluetooth_no_paired_devices">No paired Bluetooth devices</string>
+    <string name="bluetooth_paired">Paired</string>
+    <string name="bluetooth_connected">Connected</string>
+    <string name="bluetooth_pair_new_device">Pair a new device</string>
+    <string name="bluetooth_unavailable">Bluetooth is turned off or unavailable</string>
+    <string name="bluetooth_connect">Connect</string>
+    <string name="bluetooth_disconnect">Disconnect</string>
+    <string name="bluetooth_device_settings">Device settings</string>
     <string name="wifi">Wi-Fi</string>
     <string name="settings">Settings</string>
     <string name="choose_input">Inputs</string>

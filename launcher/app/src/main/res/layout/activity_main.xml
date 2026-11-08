@@ -420,6 +420,13 @@
                     android:nextFocusDown="@+id/grid" />
 
                 <TextView
+                    android:id="@+id/btnAccessories"
+                    style="@style/BareTopButtonIcon"
+                    android:contentDescription="@string/bluetooth_accessories"
+                    android:drawableStart="@drawable/ic_bluetooth"
+                    android:nextFocusDown="@+id/grid" />
+
+                <TextView
                     android:id="@+id/btnWifi"
                     style="@style/BareTopButton"
                     android:maxWidth="180dp"

@@ -5,6 +5,9 @@ import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.Dialog;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothProfile;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -82,6 +85,7 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -199,6 +203,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private TextView greeting;
     private View clockBlock;
     private View btnInputs;
+    private View btnAccessories;
+    private static final int REQUEST_BLUETOOTH_CONNECT = 71;
+    private PopupWindow bluetoothPopup;
+    private LinearLayout bluetoothRows;
+    private final Set<String> connectedBluetoothAddresses = new HashSet<>();
+    private final Map<Integer, BluetoothProfile> bluetoothProfiles = new HashMap<>();
     private View btnSleep;
     /** config show_inputs_pill: false keeps the Inputs pill hidden even when the TV has inputs. */
     private boolean showInputsPill = true;
@@ -746,8 +756,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
 
         btnInputs = findViewById(R.id.btnInputs);
+        btnAccessories = findViewById(R.id.btnAccessories);
         View btnSettings = findViewById(R.id.btnSettings);
         btnInputs.setOnClickListener(v -> showInputs());
+        btnAccessories.setOnClickListener(v -> showBluetoothAccessories());
         btnWifi.setOnClickListener(v -> openNetworkPill());
         btnVpn.setOnClickListener(v -> openVpnPill());
         btnWifi.setOnLongClickListener(v -> {
@@ -773,6 +785,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (!cfg.showNetworkPill) btnWifi.setVisibility(View.GONE);
         showInputsPill = cfg.showInputsPill;
         showInputsMenuRow = cfg.showInputsPill;
+        btnAccessories.setVisibility(getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH)
+                ? View.VISIBLE : View.GONE);
         btnLibraryTop = findViewById(R.id.btnLibraryTop);
         btnLibraryTop.setOnClickListener(v -> {
             onLibraryRequested();
@@ -866,6 +880,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             return keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v.getId() == rightButton;
         };
         btnInputs.setOnKeyListener(pillKeys);
+        btnAccessories.setOnKeyListener(pillKeys);
         btnWifi.setOnKeyListener(pillKeys);
         btnVpn.setOnKeyListener(pillKeys);
         btnSettings.setOnKeyListener(pillKeys);
@@ -887,7 +902,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             return keyCode == KeyEvent.KEYCODE_DPAD_UP || keyCode == KeyEvent.KEYCODE_DPAD_LEFT;
         });
         if (animations) {
-            List<View> pills = new ArrayList<>(Arrays.asList(btnInputs, btnWifi, btnVpn, btnReorder,
+            List<View> pills = new ArrayList<>(Arrays.asList(btnInputs, btnAccessories, btnWifi, btnVpn, btnReorder,
                     btnLibraryTop, btnSleep, btnSettings));
             pills.addAll(topAppButtons);
             for (View button : pills) {
@@ -1094,6 +1109,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 lastPetalShower = today;
                 handler.postDelayed(this::playPetalShower, 450);
             }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_BLUETOOTH_CONNECT && grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            showBluetoothAccessories();
         }
     }
 
@@ -1343,6 +1367,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         super.onDestroy();
         unregisterReceiver(packageReceiver);
         wallpaperPlayer.close();
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if (adapter != null) {
+            for (Map.Entry<Integer, BluetoothProfile> entry : bluetoothProfiles.entrySet()) {
+                try { adapter.closeProfileProxy(entry.getKey(), entry.getValue()); }
+                catch (RuntimeException ignored) { }
+            }
+        }
         ConnectivityManager cm = getSystemService(ConnectivityManager.class);
         TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
         if (tim != null) tim.unregisterCallback(inputCallback);
@@ -3561,8 +3592,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             return;
         }
         boolean any = liveTvIntent() != null || !sourcePanelService.isEmpty()
-                || (coocaaSources && !CoocaaSources.list(this).isEmpty())
-                || getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH);
+                || (coocaaSources && !CoocaaSources.list(this).isEmpty());
         TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
         if (!any && tim != null) {
             for (TvInputInfo info : tim.getTvInputList()) {
@@ -3861,16 +3891,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             final Intent liveTvIntent = liveTv;
             addInputRow(rows, popup, R.drawable.ic_livetv, getString(R.string.live_tv), -1, () -> open(liveTvIntent));
         }
-        // Android manages discovery, pairing, and profile connections. Keep the entry in this same
-        // list without running a launcher-side scan that would need location access.
-        if (getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH)) {
-            if (rows.getChildCount() > 0) addSeparator(rows);
-            addInputRow(rows, popup, R.drawable.ic_bluetooth, getString(R.string.bluetooth_devices), -1,
-                    () -> open(systemIntent(Settings.ACTION_BLUETOOTH_SETTINGS)));
-            TextView hint = rows.getChildAt(rows.getChildCount() - 1).findViewById(R.id.status);
-            hint.setText(R.string.bluetooth_pair_or_connect);
-            hint.setVisibility(View.VISIBLE);
-        }
         if (rows.getChildCount() == 0) {
             Toast.makeText(this, R.string.no_inputs, Toast.LENGTH_SHORT).show();
             return;
@@ -3883,6 +3903,193 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         int alignment = getResources().getBoolean(R.bool.rtl_menu_bar) != underGear ? Gravity.END : Gravity.START;
         dropIn(popup, panel, anchor, alignment);
         rows.getChildAt(0).requestFocus();
+    }
+
+    private void showBluetoothAccessories() {
+        if (Build.VERSION.SDK_INT >= 31
+                && checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.BLUETOOTH_CONNECT},
+                    REQUEST_BLUETOOTH_CONNECT);
+            return;
+        }
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if (adapter == null || !adapter.isEnabled()) {
+            Toast.makeText(this, R.string.bluetooth_unavailable, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
+        bluetoothRows = panel.findViewById(R.id.rows);
+        View anchor = btnAccessories.getVisibility() == View.VISIBLE ? btnAccessories : btnInputs;
+        int width = Math.max(anchor.getWidth(), (int) (190 * density));
+        bluetoothPopup = glassPopup(panel, width);
+        List<BluetoothDevice> devices = new ArrayList<>(adapter.getBondedDevices());
+        Collections.sort(devices, (a, b) -> safeBluetoothName(a).compareToIgnoreCase(safeBluetoothName(b)));
+        if (devices.isEmpty()) {
+            addBluetoothMessage(bluetoothRows, R.string.bluetooth_no_paired_devices);
+        } else {
+            for (BluetoothDevice device : devices) {
+                String address = device.getAddress();
+                View row = getLayoutInflater().inflate(R.layout.item_input, bluetoothRows, false);
+                ((ImageView) row.findViewById(R.id.icon)).setImageResource(R.drawable.ic_bluetooth);
+                ((TextView) row.findViewById(R.id.title)).setText(safeBluetoothName(device));
+                row.setTag(address);
+                TextView status = row.findViewById(R.id.status);
+                status.setText(connectedBluetoothAddresses.contains(address)
+                        ? R.string.bluetooth_connected : R.string.bluetooth_paired);
+                row.findViewById(R.id.dot).setVisibility(connectedBluetoothAddresses.contains(address)
+                        ? View.VISIBLE : View.GONE);
+                row.setOnClickListener(v -> {
+                    bluetoothPopup.dismiss();
+                    // LE HID remotes are managed by the TV's Bluetooth service, not A2DP/Headset
+                    // profile proxies. Their Connect action would always fail; open their system
+                    // options directly instead.
+                    if (device.getType() == BluetoothDevice.DEVICE_TYPE_LE) {
+                        openBluetoothDeviceOptions(device);
+                    } else {
+                        showBluetoothDeviceActions(device);
+                    }
+                });
+                bluetoothRows.addView(row);
+            }
+        }
+        if (bluetoothRows.getChildCount() > 0) addSeparator(bluetoothRows);
+        addBluetoothAction(bluetoothRows, R.string.bluetooth_pair_new_device, () -> {
+            bluetoothPopup.dismiss();
+            Intent pair = new Intent("com.google.android.intent.action.CONNECT_INPUT");
+            try { startActivity(pair); }
+            catch (ActivityNotFoundException | SecurityException e) {
+                Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+            }
+        });
+        panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        bluetoothPopup.setWidth(Math.max(width, Math.min(panel.getMeasuredWidth(), (int) (360 * density))));
+        dropIn(bluetoothPopup, panel, anchor, getResources().getBoolean(R.bool.rtl_menu_bar)
+                ? Gravity.END : Gravity.START);
+        if (bluetoothRows.getChildCount() > 0) bluetoothRows.getChildAt(0).requestFocus();
+        queryBluetoothConnections(adapter);
+    }
+
+    private String safeBluetoothName(BluetoothDevice device) {
+        String name = device.getName();
+        return name == null || name.trim().isEmpty()
+                ? "Bluetooth device " + device.getAddress().substring(device.getAddress().length() - 5)
+                : name.trim();
+    }
+
+    private void addBluetoothMessage(LinearLayout rows, int message) {
+        TextView text = new TextView(this);
+        text.setText(message);
+        text.setTextColor(0xCCFFFFFF);
+        text.setTextSize(14);
+        text.setGravity(Gravity.CENTER_VERTICAL);
+        text.setPadding((int) (12 * density), 0, (int) (12 * density), 0);
+        rows.addView(text, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                (int) (46 * density)));
+    }
+
+    private void addBluetoothAction(LinearLayout rows, int title, Runnable action) {
+        View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
+        row.findViewById(R.id.icon).setVisibility(View.GONE);
+        row.findViewById(R.id.dot).setVisibility(View.GONE);
+        row.findViewById(R.id.status).setVisibility(View.GONE);
+        ((TextView) row.findViewById(R.id.title)).setText(title);
+        row.setOnClickListener(v -> action.run());
+        rows.addView(row);
+    }
+
+    private void showBluetoothDeviceActions(BluetoothDevice device) {
+        View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        PopupWindow popup = glassPopup(panel, (int) (220 * density));
+        boolean connected = connectedBluetoothAddresses.contains(device.getAddress());
+        addBluetoothAction(rows, connected ? R.string.bluetooth_disconnect : R.string.bluetooth_connect, () -> {
+            popup.dismiss();
+            setBluetoothConnection(device, !connected);
+        });
+        addBluetoothAction(rows, R.string.bluetooth_device_settings, () -> {
+            popup.dismiss();
+            openBluetoothDeviceOptions(device);
+        });
+        panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        popup.setWidth(Math.max((int) (200 * density), panel.getMeasuredWidth()));
+        dropIn(popup, panel, btnAccessories, getResources().getBoolean(R.bool.rtl_menu_bar)
+                ? Gravity.END : Gravity.START);
+        rows.getChildAt(0).requestFocus();
+    }
+
+    private void setBluetoothConnection(BluetoothDevice device, boolean connect) {
+        String methodName = connect ? "connect" : "disconnect";
+        boolean invoked = false;
+        for (BluetoothProfile profile : bluetoothProfiles.values()) {
+            try {
+                Method method = profile.getClass().getMethod(methodName, BluetoothDevice.class);
+                method.setAccessible(true);
+                Object result = method.invoke(profile, device);
+                if (result instanceof Boolean && (Boolean) result) invoked = true;
+            } catch (ReflectiveOperationException | RuntimeException ignored) { }
+        }
+        if (invoked) {
+            if (connect) connectedBluetoothAddresses.add(device.getAddress());
+            else connectedBluetoothAddresses.remove(device.getAddress());
+            Toast.makeText(this, connect ? R.string.bluetooth_connect : R.string.bluetooth_disconnect,
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // Firmware may restrict a device profile to Settings. Fall back to its native options rather
+        // than telling the user the launcher cannot control it and leaving them stuck.
+        openBluetoothDeviceOptions(device);
+    }
+
+    private void openBluetoothDeviceOptions(BluetoothDevice device) {
+        Intent options = new Intent().setComponent(new ComponentName("com.android.tv.settings",
+                "com.android.tv.settings.accessories.BluetoothAccessoryActivity"))
+                .putExtra("accessory_address", device.getAddress())
+                .putExtra("accessory_name", safeBluetoothName(device))
+                .putExtra("accessory_icon_res", 0);
+        try { startActivity(options); }
+        catch (ActivityNotFoundException | SecurityException e) {
+            Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void queryBluetoothConnections(BluetoothAdapter adapter) {
+        connectedBluetoothAddresses.clear();
+        bluetoothProfiles.clear();
+        BluetoothProfile.ServiceListener listener = new BluetoothProfile.ServiceListener() {
+            @Override public void onServiceConnected(int profile, BluetoothProfile proxy) {
+                bluetoothProfiles.put(profile, proxy);
+                for (BluetoothDevice device : adapter.getBondedDevices()) {
+                    try {
+                        if (proxy.getConnectionState(device) == BluetoothProfile.STATE_CONNECTED) {
+                            connectedBluetoothAddresses.add(device.getAddress());
+                        }
+                    } catch (RuntimeException ignored) { }
+                }
+                refreshBluetoothRows();
+            }
+            @Override public void onServiceDisconnected(int profile) { }
+        };
+        try { adapter.getProfileProxy(this, listener, BluetoothProfile.A2DP); }
+        catch (RuntimeException ignored) { }
+        try { adapter.getProfileProxy(this, listener, BluetoothProfile.HEADSET); }
+        catch (RuntimeException ignored) { }
+    }
+
+    private void refreshBluetoothRows() {
+        if (bluetoothRows == null) return;
+        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+        if (adapter == null) return;
+        for (int i = 0; i < bluetoothRows.getChildCount(); i++) {
+            View row = bluetoothRows.getChildAt(i);
+            Object tag = row.getTag();
+            if (!(tag instanceof String)) continue;
+            boolean connected = connectedBluetoothAddresses.contains((String) tag);
+            ((TextView) row.findViewById(R.id.status)).setText(connected
+                    ? R.string.bluetooth_connected : R.string.bluetooth_paired);
+            row.findViewById(R.id.dot).setVisibility(connected ? View.VISIBLE : View.GONE);
+        }
     }
 
     private PopupWindow glassPopup(View panel, int width) {
